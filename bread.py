@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""
-BREAD - a bread-only implementation of the Chicken esoteric language.
+"""BREAD interpreter.
 
-A .bread source file contains only the token "bread", spaces, and newlines.
-The number of breads on each line is an instruction/opcode.
+BREAD is a standalone one-word programming language.
+
+A .bread source file contains only the token ``bread``, spaces, and newlines.
+The number of ``bread`` tokens on each line is an opcode. Instructions that
+need an operand consume the following physical line as a numeric value.
+
+The repetition count is therefore the literal value itself: a PUSH followed
+by a line containing 65 breads pushes 65, which can be printed as ``A``.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Callable, TextIO
 
 
 class BreadError(Exception):
@@ -19,122 +24,187 @@ class BreadError(Exception):
 
 
 class BreadSyntaxError(BreadError):
-    """Raised when source contains invalid characters/tokens."""
+    """Raised when source contains invalid BREAD syntax."""
 
 
 class BreadRuntimeError(BreadError):
     """Raised when execution cannot continue."""
 
 
-# Chicken/BREAD opcode table.
-EXIT = 0       # axe
-BREAD = 1      # chicken
+# Opcodes. A source line's bread count is one opcode.
+HALT = 0
+PUSH = 1
 ADD = 2
 SUB = 3
 MUL = 4
-CMP = 5
-LOAD = 6
-STORE = 7
-JUMP = 8
-CHAR = 9       # BBQ
-LITERAL_BASE = 10
+DIV = 5
+MOD = 6
+EQ = 7
+LT = 8
+GT = 9
+PRINT_CHAR = 10
+PRINT_NUM = 11
+INPUT = 12
+INPUT_CHAR = 13
+IF_FALSE = 14
+JUMP = 15
+LOAD = 16
+STORE = 17
+DUP = 18
+SWAP = 19
+DROP = 20
+AND = 21
+OR = 22
+NOT = 23
+NE = 24
+LE = 25
+GE = 26
+CONCAT = 27
+PRINT = 28
+NEWLINE = 29
+CLEAR = 30
+STACK_LEN = 31
+TO_CHAR = 32
+TO_NUM = 33
+
+OPCODE_NAMES = {
+    HALT: "HALT",
+    PUSH: "PUSH",
+    ADD: "ADD",
+    SUB: "SUB",
+    MUL: "MUL",
+    DIV: "DIV",
+    MOD: "MOD",
+    EQ: "EQ",
+    LT: "LT",
+    GT: "GT",
+    PRINT_CHAR: "PRINT_CHAR",
+    PRINT_NUM: "PRINT_NUM",
+    INPUT: "INPUT",
+    INPUT_CHAR: "INPUT_CHAR",
+    IF_FALSE: "IF_FALSE",
+    JUMP: "JUMP",
+    LOAD: "LOAD",
+    STORE: "STORE",
+    DUP: "DUP",
+    SWAP: "SWAP",
+    DROP: "DROP",
+    AND: "AND",
+    OR: "OR",
+    NOT: "NOT",
+    NE: "NE",
+    LE: "LE",
+    GE: "GE",
+    CONCAT: "CONCAT",
+    PRINT: "PRINT",
+    NEWLINE: "NEWLINE",
+    CLEAR: "CLEAR",
+    STACK_LEN: "STACK_LEN",
+    TO_CHAR: "TO_CHAR",
+    TO_NUM: "TO_NUM",
+}
+
+MAX_BREADS = 255
 
 
 def compile_source(source: str) -> list[int]:
-    """Compile BREAD source into numeric instructions.
+    """Compile source into line-count instructions.
 
-    Every physical line is significant. A blank line is opcode 0 (EXIT).
-    Only lowercase ``bread`` separated by literal spaces is accepted.
+    Blank lines are valid and become opcode 0 (HALT). Newlines are therefore
+    significant, including a final newline.
     """
-    lines = source.split("\n")
     program: list[int] = []
-
-    for line_no, line in enumerate(lines, start=1):
+    for line_no, line in enumerate(source.split("\n"), start=1):
         if "\t" in line or "\r" in line:
             raise BreadSyntaxError(
-                f"invalid whitespace on line {line_no}; use spaces only"
+                f"line {line_no}: only spaces may separate the word 'bread'"
             )
 
         parts = line.split(" ")
-        bad = [part for part in parts if part and part != "bread"]
-        if bad:
-            raise BreadSyntaxError(
-                f"invalid token on line {line_no}: {bad[0]!r}; expected 'bread'"
-            )
+        for token in parts:
+            if token and token != "bread":
+                raise BreadSyntaxError(
+                    f"line {line_no}: invalid token {token!r}; expected only 'bread'"
+                )
 
-        program.append(sum(part == "bread" for part in parts))
+        count = sum(token == "bread" for token in parts)
+        if count > MAX_BREADS:
+            raise BreadSyntaxError(f"line {line_no}: too many breads (maximum 255)")
+        program.append(count)
 
     return program
 
 
-def _js_number(value: Any) -> int | float:
-    """Numeric conversion for the primitive values BREAD can create."""
-    if value is None:
-        return 0
-    if value is True:
-        return 1
-    if value is False:
-        return 0
-    if isinstance(value, (int, float)):
-        return value
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped == "":
-            return 0
-        try:
-            number = float(stripped)
-        except ValueError as exc:
-            raise BreadRuntimeError(
-                f"cannot convert {value!r} to a number"
-            ) from exc
-        return int(number) if number.is_integer() else number
-    raise BreadRuntimeError(f"cannot convert {value!r} to a number")
-
-
-def _js_add(a: Any, b: Any) -> Any:
-    """Match Chicken's JavaScript-style + behavior for strings/numbers."""
-    if isinstance(a, str) or isinstance(b, str):
-        return f"{a}{b}"
-    return _js_number(a) + _js_number(b)
-
-
-def _truthy(value: Any) -> bool:
-    """Truthiness for values used by the Chicken semantics."""
+def truthy(value: Any) -> bool:
     if value is None or value is False:
         return False
     if isinstance(value, (int, float)) and value == 0:
         return False
     if isinstance(value, str) and value == "":
         return False
+    if isinstance(value, (list, tuple, bytes)) and not value:
+        return False
     return True
+
+
+def number(value: Any) -> int | float:
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return 0
+        try:
+            result = float(text)
+        except ValueError as exc:
+            raise BreadRuntimeError(f"cannot convert {value!r} to a number") from exc
+        return int(result) if result.is_integer() else result
+    raise BreadRuntimeError(f"cannot convert {value!r} to a number")
+
+
+def character_codes(text: str) -> list[int]:
+    """Convert ordinary user text to character-code values."""
+    return [ord(ch) for ch in text]
+
+
+def char_from_value(value: Any) -> str:
+    code = int(number(value))
+    if not 0 <= code <= 0x10FFFF:
+        raise BreadRuntimeError(f"character value {code} is outside Unicode range")
+    if 0xD800 <= code <= 0xDFFF:
+        raise BreadRuntimeError(f"character value {code} is a Unicode surrogate")
+    return chr(code)
+
+
+def value_to_text(value: Any) -> str:
+    if isinstance(value, list):
+        try:
+            return "".join(char_from_value(item) for item in value)
+        except (TypeError, ValueError, BreadRuntimeError) as exc:
+            raise BreadRuntimeError("cannot print that list as text") from exc
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 @dataclass
 class VM:
-    """Shared-stack virtual machine matching the documented Chicken model."""
-
     program: list[int]
-    user_input: str = ""
+    prompt: str = "bread> "
     trace: bool = False
-
-    def __post_init__(self) -> None:
-        # Three non-isolated stack segments:
-        #   [0] reference to the complete VM stack
-        #   [1] user input
-        #   [2:] code, followed by a terminating EXIT
-        self.stack: list[Any] = []
-        self.stack.append(self.stack)
-        self.stack.append(self.user_input)
-        self.stack.extend(self.program)
-        self.stack.append(EXIT)
-
-        self.ip = 2
-        self.data_start = len(self.stack)
-        self.halted = False
-
-    @property
-    def data_stack(self) -> list[Any]:
-        return self.stack[self.data_start :]
+    input_func: Callable[[str], str] = input
+    output: TextIO = sys.stdout
+    stack: list[Any] = field(default_factory=list)
+    memory: list[Any] = field(default_factory=lambda: [0] * 256)
+    input_buffer: list[int] = field(default_factory=list)
+    ip: int = 0
+    halted: bool = False
 
     def push(self, value: Any) -> None:
         self.stack.append(value)
@@ -144,152 +214,231 @@ class VM:
             raise BreadRuntimeError("stack underflow")
         return self.stack.pop()
 
-    def next_token(self) -> Any:
-        if self.ip < 0 or self.ip >= len(self.stack):
-            raise BreadRuntimeError(
-                f"instruction pointer out of range: {self.ip}"
-            )
-        token = self.stack[self.ip]
+    def operand(self) -> int:
+        if self.ip >= len(self.program):
+            raise BreadRuntimeError("missing operand at end of program")
+        value = self.program[self.ip]
         self.ip += 1
-        return token
+        return value
 
-    def dispatch(self, op: Any) -> None:
-        if op == EXIT:
+    def signed_operand(self) -> int:
+        value = self.operand()
+        return value if value < 128 else value - 256
+
+    def check_target(self, target: int, instruction: str) -> None:
+        if target < 0 or target > len(self.program):
+            raise BreadRuntimeError(
+                f"{instruction} target {target} is outside the program"
+            )
+
+    def trace_line(self, op: int) -> None:
+        if self.trace:
+            name = OPCODE_NAMES.get(op, f"UNKNOWN({op})")
+            print(
+                f"[trace] ip={self.ip - 1} op={op} ({name}) stack={self.stack!r}",
+                file=sys.stderr,
+            )
+
+    def dispatch(self, op: int) -> None:
+        if op == HALT:
             self.halted = True
 
-        elif op == BREAD:
-            self.push("bread")
+        elif op == PUSH:
+            self.push(self.operand())
 
         elif op == ADD:
-            b = self.pop()
-            a = self.pop()
-            self.push(_js_add(a, b))
+            b, a = self.pop(), self.pop()
+            if isinstance(a, str) or isinstance(b, str):
+                self.push(value_to_text(a) + value_to_text(b))
+            else:
+                self.push(number(a) + number(b))
 
         elif op == SUB:
-            b = self.pop()
-            a = self.pop()
-            self.push(_js_number(a) - _js_number(b))
+            b, a = self.pop(), self.pop()
+            self.push(number(a) - number(b))
 
         elif op == MUL:
-            b = self.pop()
-            a = self.pop()
-            self.push(_js_number(a) * _js_number(b))
+            b, a = self.pop(), self.pop()
+            self.push(number(a) * number(b))
 
-        elif op == CMP:
-            b = self.pop()
-            a = self.pop()
-            self.push(a == b)
+        elif op == DIV:
+            b, a = self.pop(), self.pop()
+            divisor = number(b)
+            if divisor == 0:
+                raise BreadRuntimeError("division by zero")
+            result = number(a) / divisor
+            self.push(int(result) if isinstance(result, float) and result.is_integer() else result)
 
-        elif op == LOAD:
-            # Double-wide instruction. The next instruction selects source:
-            # 0 = complete VM stack, 1 = user input.
-            source_id = self.next_token()
-            if source_id not in (0, 1):
-                raise BreadRuntimeError(
-                    f"LOAD source must be 0 or 1, got {source_id!r}"
-                )
+        elif op == MOD:
+            b, a = self.pop(), self.pop()
+            divisor = number(b)
+            if divisor == 0:
+                raise BreadRuntimeError("modulo by zero")
+            self.push(number(a) % divisor)
 
-            index_value = self.pop()
-            index = int(_js_number(index_value))
-            source = self.stack[source_id]
+        elif op in (EQ, NE, LT, GT, LE, GE):
+            b, a = self.pop(), self.pop()
+            if op == EQ:
+                result = a == b
+            elif op == NE:
+                result = a != b
+            elif op == LT:
+                result = number(a) < number(b)
+            elif op == GT:
+                result = number(a) > number(b)
+            elif op == LE:
+                result = number(a) <= number(b)
+            else:
+                result = number(a) >= number(b)
+            self.push(result)
+
+        elif op == PRINT_CHAR:
+            self.output.write(char_from_value(self.pop()))
+            self.output.flush()
+
+        elif op == PRINT_NUM:
+            self.output.write(str(number(self.pop())))
+            self.output.flush()
+
+        elif op == INPUT:
             try:
-                self.push(source[index])
-            except (IndexError, TypeError) as exc:
-                raise BreadRuntimeError(
-                    f"invalid LOAD index {index} from source {source_id}"
-                ) from exc
+                text = self.input_func(self.prompt)
+            except EOFError:
+                text = ""
+            self.push(character_codes(text))
 
-        elif op == STORE:
-            address_value = self.pop()
-            value = self.pop()
-            address = int(_js_number(address_value))
-            if address < 0 or address >= len(self.stack):
-                raise BreadRuntimeError(
-                    f"STORE address out of range: {address}"
-                )
-            self.stack[address] = value
+        elif op == INPUT_CHAR:
+            if not self.input_buffer:
+                try:
+                    text = self.input_func(self.prompt)
+                except EOFError:
+                    text = ""
+                self.input_buffer = character_codes(text)
+            self.push(self.input_buffer.pop(0) if self.input_buffer else -1)
+
+        elif op == IF_FALSE:
+            condition = self.pop()
+            offset = self.signed_operand()
+            if not truthy(condition):
+                target = self.ip + offset
+                self.check_target(target, "IF_FALSE")
+                self.ip = target
 
         elif op == JUMP:
-            offset_value = self.pop()
-            condition = self.pop()
-            if _truthy(condition):
-                self.ip += int(_js_number(offset_value))
+            offset = self.signed_operand()
+            target = self.ip + offset
+            self.check_target(target, "JUMP")
+            self.ip = target
 
-        elif op == CHAR:
-            value = int(_js_number(self.pop()))
-            if not 0 <= value <= 127:
-                raise BreadRuntimeError(
-                    f"ASCII value out of range for BBQ: {value}"
-                )
-            self.push(chr(value))
+        elif op == LOAD:
+            address = self.operand()
+            if not 0 <= address < len(self.memory):
+                raise BreadRuntimeError(f"memory address {address} is out of range")
+            self.push(self.memory[address])
 
-        elif isinstance(op, int) and op >= LITERAL_BASE:
-            # n >= 10 pushes literal n-10.
-            self.push(op - LITERAL_BASE)
+        elif op == STORE:
+            address = self.operand()
+            if not 0 <= address < len(self.memory):
+                raise BreadRuntimeError(f"memory address {address} is out of range")
+            self.memory[address] = self.pop()
+
+        elif op == DUP:
+            if not self.stack:
+                raise BreadRuntimeError("stack underflow")
+            self.push(self.stack[-1])
+
+        elif op == SWAP:
+            if len(self.stack) < 2:
+                raise BreadRuntimeError("stack underflow")
+            self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
+
+        elif op == DROP:
+            self.pop()
+
+        elif op == AND:
+            b, a = self.pop(), self.pop()
+            self.push(truthy(a) and truthy(b))
+
+        elif op == OR:
+            b, a = self.pop(), self.pop()
+            self.push(truthy(a) or truthy(b))
+
+        elif op == NOT:
+            self.push(not truthy(self.pop()))
+
+        elif op == CONCAT:
+            b, a = self.pop(), self.pop()
+            self.push(value_to_text(a) + value_to_text(b))
+
+        elif op == PRINT:
+            self.output.write(value_to_text(self.pop()))
+            self.output.flush()
+
+        elif op == NEWLINE:
+            self.output.write("\n")
+            self.output.flush()
+
+        elif op == CLEAR:
+            self.stack.clear()
+
+        elif op == STACK_LEN:
+            self.push(len(self.stack))
+
+        elif op == TO_CHAR:
+            self.push(char_from_value(self.pop()))
+
+        elif op == TO_NUM:
+            self.push(number(self.pop()))
 
         else:
-            raise BreadRuntimeError(f"invalid opcode/token: {op!r}")
+            raise BreadRuntimeError(f"unknown opcode {op}")
 
     def run(self) -> Any:
-        """Execute until EXIT and return the top value on the data stack."""
         while not self.halted:
-            if self.ip < 0 or self.ip >= len(self.stack):
-                raise BreadRuntimeError(
-                    f"instruction pointer out of range: {self.ip}"
-                )
-
-            op = self.next_token()
-            if self.trace:
-                print(
-                    f"[trace] ip={self.ip - 1} op={op!r} "
-                    f"stack={self.data_stack!r}",
-                    file=sys.stderr,
-                )
+            if self.ip >= len(self.program):
+                raise BreadRuntimeError("program ended without HALT")
+            op = self.program[self.ip]
+            self.ip += 1
+            self.trace_line(op)
             self.dispatch(op)
+        return self.stack[-1] if self.stack else None
 
-        return self.data_stack[-1] if self.data_stack else ""
 
-
-def run_source(source: str, user_input: str = "", trace: bool = False) -> Any:
-    """Compile and execute BREAD source."""
-    return VM(compile_source(source), user_input=user_input, trace=trace).run()
+def run_source(
+    source: str,
+    *,
+    prompt: str = "bread> ",
+    trace: bool = False,
+    input_func: Callable[[str], str] = input,
+    output: TextIO = sys.stdout,
+) -> Any:
+    return VM(
+        compile_source(source),
+        prompt=prompt,
+        trace=trace,
+        input_func=input_func,
+        output=output,
+    ).run()
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="bread.py",
-        description="Interpret a .bread program.",
-    )
+    parser = argparse.ArgumentParser(description="Run a .bread program.")
     parser.add_argument("file", help="path to a .bread source file")
     parser.add_argument(
-        "-i",
-        "--input",
-        default="",
-        help="value supplied as BREAD's input register",
+        "-p", "--prompt", default="bread> ", help="prompt used by INPUT instructions"
     )
     parser.add_argument(
-        "--trace",
-        action="store_true",
-        help="show VM execution details on stderr",
+        "--trace", action="store_true", help="show instruction execution on stderr"
     )
     args = parser.parse_args(argv)
 
     try:
-        with open(args.file, "r", encoding="utf-8", newline="") as handle:
+        with open(args.file, "r", encoding="utf-8") as handle:
             source = handle.read()
-        result = run_source(source, args.input, args.trace)
+        run_source(source, prompt=args.prompt, trace=args.trace)
     except (OSError, BreadError) as exc:
         print(f"BREAD error: {exc}", file=sys.stderr)
         return 1
-
-    # The browser Chicken implementation exposes the final VM value.
-    # CHAR turns an ASCII value into printable character data.
-    if isinstance(result, str):
-        sys.stdout.write(result)
-    elif isinstance(result, bool):
-        sys.stdout.write("true" if result else "false")
-    else:
-        sys.stdout.write(str(result))
 
     return 0
 
