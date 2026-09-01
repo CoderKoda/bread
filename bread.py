@@ -4,11 +4,12 @@
 BREAD is a standalone one-word programming language.
 
 A .bread source file contains only the token ``bread``, spaces, and newlines.
-The number of ``bread`` tokens on each line is an opcode. Instructions that
-need an operand consume the following physical line as a numeric value.
+The number of ``bread`` tokens on each line is a value. Some values are
+instructions; instruction operands are supplied by the following line.
 
-The repetition count is therefore the literal value itself: a PUSH followed
-by a line containing 65 breads pushes 65, which can be printed as ``A``.
+Most importantly, literal values are represented by repetition: 65 breads is
+literally the number 65. Opcode 9 converts the top numeric value to a
+character and prints it.
 """
 
 from __future__ import annotations
@@ -40,8 +41,8 @@ DIV = 5
 MOD = 6
 EQ = 7
 LT = 8
-GT = 9
-PRINT_CHAR = 10
+PRINT_CHAR = 9
+GT = 10
 PRINT_NUM = 11
 INPUT = 12
 INPUT_CHAR = 13
@@ -68,20 +69,20 @@ TO_NUM = 33
 
 OPCODE_NAMES = {
     HALT: "HALT", PUSH: "PUSH", ADD: "ADD", SUB: "SUB", MUL: "MUL",
-    DIV: "DIV", MOD: "MOD", EQ: "EQ", LT: "LT", GT: "GT",
-    PRINT_CHAR: "PRINT_CHAR", PRINT_NUM: "PRINT_NUM", INPUT: "INPUT",
-    INPUT_CHAR: "INPUT_CHAR", IF_FALSE: "IF_FALSE", JUMP: "JUMP",
-    LOAD: "LOAD", STORE: "STORE", DUP: "DUP", SWAP: "SWAP", DROP: "DROP",
-    AND: "AND", OR: "OR", NOT: "NOT", NE: "NE", LE: "LE", GE: "GE",
-    CONCAT: "CONCAT", PRINT: "PRINT", NEWLINE: "NEWLINE", CLEAR: "CLEAR",
-    STACK_LEN: "STACK_LEN", TO_CHAR: "TO_CHAR", TO_NUM: "TO_NUM",
+    DIV: "DIV", MOD: "MOD", EQ: "EQ", LT: "LT", PRINT_CHAR: "PRINT_CHAR",
+    GT: "GT", PRINT_NUM: "PRINT_NUM", INPUT: "INPUT", INPUT_CHAR: "INPUT_CHAR",
+    IF_FALSE: "IF_FALSE", JUMP: "JUMP", LOAD: "LOAD", STORE: "STORE",
+    DUP: "DUP", SWAP: "SWAP", DROP: "DROP", AND: "AND", OR: "OR", NOT: "NOT",
+    NE: "NE", LE: "LE", GE: "GE", CONCAT: "CONCAT", PRINT: "PRINT",
+    NEWLINE: "NEWLINE", CLEAR: "CLEAR", STACK_LEN: "STACK_LEN", TO_CHAR: "TO_CHAR",
+    TO_NUM: "TO_NUM",
 }
 
-MAX_BREADS = 255
+MAX_LINE_BREADS = 1_000_000
 
 
 def compile_source(source: str) -> list[int]:
-    """Compile source into one integer instruction per physical line."""
+    """Compile source into one integer value per physical line."""
     program: list[int] = []
     for line_no, line in enumerate(source.split("\n"), start=1):
         if "\t" in line or "\r" in line:
@@ -95,8 +96,10 @@ def compile_source(source: str) -> list[int]:
                     f"line {line_no}: invalid token {token!r}; expected only 'bread'"
                 )
         count = sum(token == "bread" for token in parts)
-        if count > MAX_BREADS:
-            raise BreadSyntaxError(f"line {line_no}: too many breads (maximum 255)")
+        if count > MAX_LINE_BREADS:
+            raise BreadSyntaxError(
+                f"line {line_no}: too many breads (maximum {MAX_LINE_BREADS})"
+            )
         program.append(count)
     return program
 
@@ -131,7 +134,6 @@ def number(value: Any) -> int | float:
 
 
 def character_codes(text: str) -> list[int]:
-    """Convert ordinary user text into character-code values."""
     return [ord(ch) for ch in text]
 
 
