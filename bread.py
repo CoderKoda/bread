@@ -31,7 +31,6 @@ class BreadRuntimeError(BreadError):
     """Raised when execution cannot continue."""
 
 
-# Opcodes. A source line's bread count is one opcode.
 HALT = 0
 PUSH = 1
 ADD = 2
@@ -68,70 +67,37 @@ TO_CHAR = 32
 TO_NUM = 33
 
 OPCODE_NAMES = {
-    HALT: "HALT",
-    PUSH: "PUSH",
-    ADD: "ADD",
-    SUB: "SUB",
-    MUL: "MUL",
-    DIV: "DIV",
-    MOD: "MOD",
-    EQ: "EQ",
-    LT: "LT",
-    GT: "GT",
-    PRINT_CHAR: "PRINT_CHAR",
-    PRINT_NUM: "PRINT_NUM",
-    INPUT: "INPUT",
-    INPUT_CHAR: "INPUT_CHAR",
-    IF_FALSE: "IF_FALSE",
-    JUMP: "JUMP",
-    LOAD: "LOAD",
-    STORE: "STORE",
-    DUP: "DUP",
-    SWAP: "SWAP",
-    DROP: "DROP",
-    AND: "AND",
-    OR: "OR",
-    NOT: "NOT",
-    NE: "NE",
-    LE: "LE",
-    GE: "GE",
-    CONCAT: "CONCAT",
-    PRINT: "PRINT",
-    NEWLINE: "NEWLINE",
-    CLEAR: "CLEAR",
-    STACK_LEN: "STACK_LEN",
-    TO_CHAR: "TO_CHAR",
-    TO_NUM: "TO_NUM",
+    HALT: "HALT", PUSH: "PUSH", ADD: "ADD", SUB: "SUB", MUL: "MUL",
+    DIV: "DIV", MOD: "MOD", EQ: "EQ", LT: "LT", GT: "GT",
+    PRINT_CHAR: "PRINT_CHAR", PRINT_NUM: "PRINT_NUM", INPUT: "INPUT",
+    INPUT_CHAR: "INPUT_CHAR", IF_FALSE: "IF_FALSE", JUMP: "JUMP",
+    LOAD: "LOAD", STORE: "STORE", DUP: "DUP", SWAP: "SWAP", DROP: "DROP",
+    AND: "AND", OR: "OR", NOT: "NOT", NE: "NE", LE: "LE", GE: "GE",
+    CONCAT: "CONCAT", PRINT: "PRINT", NEWLINE: "NEWLINE", CLEAR: "CLEAR",
+    STACK_LEN: "STACK_LEN", TO_CHAR: "TO_CHAR", TO_NUM: "TO_NUM",
 }
 
 MAX_BREADS = 255
 
 
 def compile_source(source: str) -> list[int]:
-    """Compile source into line-count instructions.
-
-    Blank lines are valid and become opcode 0 (HALT). Newlines are therefore
-    significant, including a final newline.
-    """
+    """Compile source into one integer instruction per physical line."""
     program: list[int] = []
     for line_no, line in enumerate(source.split("\n"), start=1):
         if "\t" in line or "\r" in line:
             raise BreadSyntaxError(
                 f"line {line_no}: only spaces may separate the word 'bread'"
             )
-
         parts = line.split(" ")
         for token in parts:
             if token and token != "bread":
                 raise BreadSyntaxError(
                     f"line {line_no}: invalid token {token!r}; expected only 'bread'"
                 )
-
         count = sum(token == "bread" for token in parts)
         if count > MAX_BREADS:
             raise BreadSyntaxError(f"line {line_no}: too many breads (maximum 255)")
         program.append(count)
-
     return program
 
 
@@ -165,7 +131,7 @@ def number(value: Any) -> int | float:
 
 
 def character_codes(text: str) -> list[int]:
-    """Convert ordinary user text to character-code values."""
+    """Convert ordinary user text into character-code values."""
     return [ord(ch) for ch in text]
 
 
@@ -242,25 +208,20 @@ class VM:
     def dispatch(self, op: int) -> None:
         if op == HALT:
             self.halted = True
-
         elif op == PUSH:
             self.push(self.operand())
-
         elif op == ADD:
             b, a = self.pop(), self.pop()
             if isinstance(a, str) or isinstance(b, str):
                 self.push(value_to_text(a) + value_to_text(b))
             else:
                 self.push(number(a) + number(b))
-
         elif op == SUB:
             b, a = self.pop(), self.pop()
             self.push(number(a) - number(b))
-
         elif op == MUL:
             b, a = self.pop(), self.pop()
             self.push(number(a) * number(b))
-
         elif op == DIV:
             b, a = self.pop(), self.pop()
             divisor = number(b)
@@ -268,14 +229,12 @@ class VM:
                 raise BreadRuntimeError("division by zero")
             result = number(a) / divisor
             self.push(int(result) if isinstance(result, float) and result.is_integer() else result)
-
         elif op == MOD:
             b, a = self.pop(), self.pop()
             divisor = number(b)
             if divisor == 0:
                 raise BreadRuntimeError("modulo by zero")
             self.push(number(a) % divisor)
-
         elif op in (EQ, NE, LT, GT, LE, GE):
             b, a = self.pop(), self.pop()
             if op == EQ:
@@ -291,22 +250,18 @@ class VM:
             else:
                 result = number(a) >= number(b)
             self.push(result)
-
         elif op == PRINT_CHAR:
             self.output.write(char_from_value(self.pop()))
             self.output.flush()
-
         elif op == PRINT_NUM:
             self.output.write(str(number(self.pop())))
             self.output.flush()
-
         elif op == INPUT:
             try:
                 text = self.input_func(self.prompt)
             except EOFError:
                 text = ""
             self.push(character_codes(text))
-
         elif op == INPUT_CHAR:
             if not self.input_buffer:
                 try:
@@ -315,7 +270,6 @@ class VM:
                     text = ""
                 self.input_buffer = character_codes(text)
             self.push(self.input_buffer.pop(0) if self.input_buffer else -1)
-
         elif op == IF_FALSE:
             condition = self.pop()
             offset = self.signed_operand()
@@ -323,73 +277,56 @@ class VM:
                 target = self.ip + offset
                 self.check_target(target, "IF_FALSE")
                 self.ip = target
-
         elif op == JUMP:
             offset = self.signed_operand()
             target = self.ip + offset
             self.check_target(target, "JUMP")
             self.ip = target
-
         elif op == LOAD:
             address = self.operand()
             if not 0 <= address < len(self.memory):
                 raise BreadRuntimeError(f"memory address {address} is out of range")
             self.push(self.memory[address])
-
         elif op == STORE:
             address = self.operand()
             if not 0 <= address < len(self.memory):
                 raise BreadRuntimeError(f"memory address {address} is out of range")
             self.memory[address] = self.pop()
-
         elif op == DUP:
             if not self.stack:
                 raise BreadRuntimeError("stack underflow")
             self.push(self.stack[-1])
-
         elif op == SWAP:
             if len(self.stack) < 2:
                 raise BreadRuntimeError("stack underflow")
             self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
-
         elif op == DROP:
             self.pop()
-
         elif op == AND:
             b, a = self.pop(), self.pop()
             self.push(truthy(a) and truthy(b))
-
         elif op == OR:
             b, a = self.pop(), self.pop()
             self.push(truthy(a) or truthy(b))
-
         elif op == NOT:
             self.push(not truthy(self.pop()))
-
         elif op == CONCAT:
             b, a = self.pop(), self.pop()
             self.push(value_to_text(a) + value_to_text(b))
-
         elif op == PRINT:
             self.output.write(value_to_text(self.pop()))
             self.output.flush()
-
         elif op == NEWLINE:
             self.output.write("\n")
             self.output.flush()
-
         elif op == CLEAR:
             self.stack.clear()
-
         elif op == STACK_LEN:
             self.push(len(self.stack))
-
         elif op == TO_CHAR:
             self.push(char_from_value(self.pop()))
-
         elif op == TO_NUM:
             self.push(number(self.pop()))
-
         else:
             raise BreadRuntimeError(f"unknown opcode {op}")
 
