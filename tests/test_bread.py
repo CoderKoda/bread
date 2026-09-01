@@ -58,7 +58,7 @@ class BreadTests(unittest.TestCase):
             21,
             1, 0, 23,
             22,
-            11, 0,
+            28, 0,
         )
         _, output = self.run_program(source)
         self.assertEqual(output, "true")
@@ -85,18 +85,19 @@ class BreadTests(unittest.TestCase):
 
     def test_loop(self):
         source = program(
-            1, 3, 17, 0,
+            1, 5, 17, 0,
+            16, 0, 1, 0, 9, 14, 13,
             16, 0, 11, 29,
             16, 0, 1, 1, 3, 17, 0,
-            16, 0, 1, 0, 9, 14, 3,
-            15, 236, 0,
+            15, 236,
+            0,
         )
         _, output = self.run_program(source)
-        self.assertEqual(output, "3\n2\n1\n")
+        self.assertEqual(output, "5\n4\n3\n2\n1\n")
 
     def test_input_line(self):
-        _, output = self.run_program(program(12, 28, 0), ["hello"])
-        self.assertEqual(output, "hello")
+        _, output = self.run_program(program(12, 28, 29, 0), ["hello"])
+        self.assertEqual(output, "hello\n")
 
     def test_input_char_buffer(self):
         _, output = self.run_program(
